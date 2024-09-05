@@ -1,3 +1,5 @@
+# runway_api.py
+
 import os
 from flask import Flask, request, jsonify
 import requests
@@ -7,6 +9,10 @@ app = Flask(__name__)
 RUNWAY_API_KEY = os.environ.get('RUNWAY_API_KEY')
 RUNWAY_API_URL = "https://api.runwayml.com/v1/inference"
 XANO_API_URL = os.environ.get('XANO_API_URL')
+
+@app.route('/')
+def hello():
+    return "Hello, World! Runway AI Video Generation API is running."
 
 @app.route('/generate-video', methods=['POST'])
 def generate_video():
