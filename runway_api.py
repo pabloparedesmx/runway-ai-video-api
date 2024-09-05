@@ -1,5 +1,3 @@
-# runway_api.py
-
 import os
 from flask import Flask, request, jsonify
 import requests
@@ -10,9 +8,15 @@ RUNWAY_API_KEY = os.environ.get('RUNWAY_API_KEY')
 RUNWAY_API_URL = "https://api.runwayml.com/v1/inference"
 XANO_API_URL = os.environ.get('XANO_API_URL')
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def hello():
-    return "Hello, World! Runway AI Video Generation API is running."
+    if request.method == 'GET':
+        return "Hello, World! Runway AI Video Generation API is running. Use POST /generate-video to generate videos."
+    elif request.method == 'POST':
+        return jsonify({
+            "message": "This is the root endpoint. To generate videos, use POST /generate-video",
+            "received_data": request.json
+        })
 
 @app.route('/generate-video', methods=['POST'])
 def generate_video():
@@ -67,6 +71,10 @@ def generate_video():
             "status": "failed"
         })
         return jsonify({"error": "Failed to generate video", "details": response.text}), response.status_code
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify(error=str(e)), 405
 
 if __name__ == '__main__':
     app.run(debug=True)
