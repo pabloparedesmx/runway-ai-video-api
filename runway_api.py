@@ -1,22 +1,14 @@
 import os
+import logging
 from flask import Flask, request, jsonify
 import requests
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 RUNWAY_API_KEY = os.environ.get('RUNWAY_API_KEY')
 RUNWAY_API_URL = "https://api.runwayml.com/v1/inference"
 XANO_API_URL = os.environ.get('XANO_API_URL')
-
-@app.route('/', methods=['GET', 'POST'])
-def hello():
-    if request.method == 'GET':
-        return "Hello, World! Runway AI Video Generation API is running. Use POST /generate-video to generate videos."
-    elif request.method == 'POST':
-        return jsonify({
-            "message": "This is the root endpoint. To generate videos, use POST /generate-video",
-            "received_data": request.json
-        })
 
 @app.route('/generate-video', methods=['POST'])
 def generate_video():
@@ -27,15 +19,22 @@ def generate_video():
     if not image_url or not prompt:
         return jsonify({"error": "Missing image_url or prompt"}), 400
 
+    logging.debug(f"Received request: {data}")
+
     # Create a request in Xano
     try:
-        xano_response = requests.post(f"{XANO_API_URL}/video_requests", json={
+        xano_payload = {
             "image_url": image_url,
             "prompt": prompt,
             "status": "pending"
-        })
-        xano_response.raise_for_status()  # This will raise an exception for 4xx and 5xx status codes
+        }
+        logging.debug(f"Sending to Xano: {xano_payload}")
+        xano_response = requests.post(f"{XANO_API_URL}/video_requests", json=xano_payload)
+        logging.debug(f"Xano response status: {xano_response.status_code}")
+        logging.debug(f"Xano response content: {xano_response.text}")
+        xano_response.raise_for_status()
     except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to create request in Xano: {str(e)}")
         return jsonify({
             "error": "Failed to create request in Xano",
             "details": str(e),
@@ -43,7 +42,14 @@ def generate_video():
         }), 500
 
     xano_data = xano_response.json()
-    request_id = xano_data['id']
+    if not xano_data:
+        logging.error("Xano returned empty data")
+        return jsonify({"error": "Xano returned empty data"}), 500
+
+    request_id = xano_data[0].get('id')
+    if not request_id:
+        logging.error("No request ID returned from Xano")
+        return jsonify({"error": "No request ID returned from Xano"}), 500
 
     # Call Runway AI API
     headers = {
@@ -59,31 +65,38 @@ def generate_video():
     }
 
     try:
+        logging.debug(f"Sending to Runway AI: {payload}")
         response = requests.post(RUNWAY_API_URL, json=payload, headers=headers)
+        logging.debug(f"Runway AI response status: {response.status_code}")
+        logging.debug(f"Runway AI response content: {response.text}")
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to generate video: {str(e)}")
         # Update Xano with error status
-        requests.patch(f"{XANO_API_URL}/video_requests/{request_id}", json={
-            "status": "failed"
-        })
+        try:
+            requests.patch(f"{XANO_API_URL}/video_requests/{request_id}", json={"status": "failed"})
+        except:
+            logging.error("Failed to update Xano with error status")
         return jsonify({"error": "Failed to generate video", "details": str(e)}), 500
 
     result = response.json()
     
     # Update Xano with the result
     try:
-        requests.patch(f"{XANO_API_URL}/video_requests/{request_id}", json={
+        update_payload = {
             "status": "completed",
             "result_url": result.get('output', {}).get('video', '')
-        }).raise_for_status()
+        }
+        logging.debug(f"Updating Xano with: {update_payload}")
+        update_response = requests.patch(f"{XANO_API_URL}/video_requests/{request_id}", json=update_payload)
+        logging.debug(f"Xano update response status: {update_response.status_code}")
+        logging.debug(f"Xano update response content: {update_response.text}")
+        update_response.raise_for_status()
     except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to update Xano with result: {str(e)}")
         return jsonify({"error": "Failed to update Xano with result", "details": str(e)}), 500
 
     return jsonify(result)
-
-@app.errorhandler(405)
-def method_not_allowed(e):
-    return jsonify(error=str(e)), 405
 
 if __name__ == '__main__':
     app.run(debug=True)
