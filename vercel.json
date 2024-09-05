@@ -1,15 +1,9 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "runway_api.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "runway_api.py"
-    }
-  ]
-}
+     "version": 2,
+     "routes": [
+       {
+         "src": "/(.*)",
+         "dest": "runway_api.py"
+       }
+     ]
+   }
