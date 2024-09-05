@@ -28,14 +28,19 @@ def generate_video():
         return jsonify({"error": "Missing image_url or prompt"}), 400
 
     # Create a request in Xano
-    xano_response = requests.post(f"{XANO_API_URL}/video_requests", json={
-        "image_url": image_url,
-        "prompt": prompt,
-        "status": "pending"
-    })
-
-    if xano_response.status_code != 200:
-        return jsonify({"error": "Failed to create request in Xano"}), 500
+    try:
+        xano_response = requests.post(f"{XANO_API_URL}/video_requests", json={
+            "image_url": image_url,
+            "prompt": prompt,
+            "status": "pending"
+        })
+        xano_response.raise_for_status()  # This will raise an exception for 4xx and 5xx status codes
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "error": "Failed to create request in Xano",
+            "details": str(e),
+            "xano_url": XANO_API_URL
+        }), 500
 
     xano_data = xano_response.json()
     request_id = xano_data['id']
@@ -53,24 +58,28 @@ def generate_video():
         }
     }
 
-    response = requests.post(RUNWAY_API_URL, json=payload, headers=headers)
-
-    if response.status_code == 200:
-        result = response.json()
-        
-        # Update Xano with the result
-        requests.patch(f"{XANO_API_URL}/video_requests/{request_id}", json={
-            "status": "completed",
-            "result_url": result.get('output', {}).get('video', '')
-        })
-
-        return jsonify(result)
-    else:
+    try:
+        response = requests.post(RUNWAY_API_URL, json=payload, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
         # Update Xano with error status
         requests.patch(f"{XANO_API_URL}/video_requests/{request_id}", json={
             "status": "failed"
         })
-        return jsonify({"error": "Failed to generate video", "details": response.text}), response.status_code
+        return jsonify({"error": "Failed to generate video", "details": str(e)}), 500
+
+    result = response.json()
+    
+    # Update Xano with the result
+    try:
+        requests.patch(f"{XANO_API_URL}/video_requests/{request_id}", json={
+            "status": "completed",
+            "result_url": result.get('output', {}).get('video', '')
+        }).raise_for_status()
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": "Failed to update Xano with result", "details": str(e)}), 500
+
+    return jsonify(result)
 
 @app.errorhandler(405)
 def method_not_allowed(e):
